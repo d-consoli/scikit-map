@@ -173,6 +173,7 @@ int run(const unsigned int N_years,
     const float att_seas,
     const float att_env,
     double* ts_in,
+    double* rec_ts_out,
     double* qa_out) {
 
     const unsigned int N_samp = N_years * N_ipy;
@@ -180,13 +181,16 @@ int run(const unsigned int N_years,
     const unsigned int N_fft = N_samp + 1;
 
     // Link the input/output data to Eigen matrices
-    Eigen::Map<NumpyMatReal> ts_ext(ts_in, N_pix, N_ext);
-    Eigen::Map<NumpyMatReal> mask_ext(qa_out, N_pix, N_ext);
+    Eigen::Map<NumpyMatReal> ts(ts_in, N_pix, N_samp);
+    Eigen::Map<NumpyMatReal> rec_ts(rec_ts_out, N_pix, N_samp);
+    Eigen::Map<NumpyMatReal> qa(qa_out, N_pix, N_samp);
 
     // Create needed variables
+    NumpyMatReal ts_ext = NumpyMatReal::Zero(N_pix, N_ext);
+    NumpyMatReal mask_ext = NumpyMatReal::Zero(N_pix, N_ext);
     NumpyMatComplex ts_ext_fft(N_pix, N_fft);
     NumpyMatComplex mask_ext_fft(N_pix, N_fft);
-    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> mask = ts_ext.array().isNaN(); // Validity mask
+    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> mask = ts.array().isNaN(); // Validity mask
     Eigen::VectorXd conv(N_samp);
     Eigen::VectorXd conv_ext = Eigen::VectorXd::Ones(N_ext);
     Eigen::VectorXcd conv_ext_fft(N_fft);
@@ -197,9 +201,10 @@ int run(const unsigned int N_years,
     WrapFFT wrapFFT = WrapFFT(N_fft, N_ext, N_pix, ts_ext.data(), mask_ext.data(), ts_ext_fft.data(), mask_ext_fft.data());
 
     // Preparing the inputs for the comnputation
-    ts_ext = mask.select(0.0, ts_ext);
+    ts = mask.select(0.0, ts);
+    ts_ext.block(0, 0, N_pix, N_samp) = ts;
     mask = !mask.array(); // Switch from a NaN mask to a validity mask for the next steps
-    mask_ext.block(0, 0, N_pix, N_samp) = mask.block(0, 0, N_pix, N_samp).cast<double>();
+    mask_ext.block(0, 0, N_pix, N_samp) = mask.cast<double>();
     compute_conv_vec(conv, N_years, N_ipy, att_seas, att_env);
     conv_ext.segment(0,N_samp) = conv;
     conv_ext.segment(N_samp+1,N_samp-1) = conv.reverse().segment(0,N_samp-1);
@@ -223,8 +228,8 @@ int run(const unsigned int N_years,
     wrapFFT.clean();
 
     // Renormalize the result
-    ts_ext.block(0, 0, N_pix, N_samp).array() /= mask_ext.block(0, 0, N_pix, N_samp).array();
-    mask_ext.block(0, 0, N_pix, N_samp).array().rowwise() /= norm_qa.segment(0,N_samp).array().transpose() / N_ext;
+    rec_ts = ts_ext.block(0, 0, N_pix, N_samp).array() / mask_ext.block(0, 0, N_pix, N_samp).array();
+    qa = mask_ext.block(0, 0, N_pix, N_samp).array().rowwise() / norm_qa.segment(0,N_samp).array().transpose() / N_ext;
 
     return 0;
 }
