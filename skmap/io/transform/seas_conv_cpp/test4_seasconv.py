@@ -18,16 +18,16 @@ att_seas = 50
 att_env = 20
 N_years = 22
 N_ipy = 12
-N_row = 200
-N_col = 200
+N_row = 40
+N_col = 40
 N_img = N_years * N_ipy
 N_ext = N_img * 2
 N_pix = N_row * N_col
 N_nan = np.floor(N_img*N_pix*0.3).astype(int)
 
 mkl.set_num_threads(N_jobs)
-cmp_flag = False
-old_flag = False
+cmp_flag = True
+old_flag = True
 new_flag = True
 
 print(f"--- Creating random data")
@@ -124,8 +124,8 @@ if new_flag:
     def compute_slice(ts_array_slice, qa_array_slice, N_years, N_ipy, att_seas, att_env):
         libfile = glob.glob('build/*/seasconv*.so')[0]
         seasconv = ctypes.CDLL(libfile)
-        seasconv.run.restype = ctypes.c_int
-        seasconv.run.argtypes = [ctypes.c_uint,
+        seasconv.runDouble.restype = ctypes.c_int
+        seasconv.runDouble.argtypes = [ctypes.c_uint,
         ctypes.c_uint,
         ctypes.c_uint,
         ctypes.c_float,
@@ -133,7 +133,7 @@ if new_flag:
         np.ctypeslib.ndpointer(dtype=np.double),
         np.ctypeslib.ndpointer(dtype=np.double)]
         N_pix_tmp = ts_array_slice.shape[0]
-        res = seasconv.run(N_years, N_ipy, N_pix_tmp, att_seas, att_env, ts_array_slice, qa_array_slice)
+        res = seasconv.runDouble(N_years, N_ipy, N_pix_tmp, att_seas, att_env, ts_array_slice, qa_array_slice)
         pass
 
 
