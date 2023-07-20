@@ -21,6 +21,20 @@ struct TypesFFTW<double> {
     static constexpr auto Free = fftw_free;
 };
 
+template <>
+struct TypesFFTW<float> {
+    using PlanType = fftwf_plan;
+    using ComplexType = fftwf_complex;
+    static constexpr auto Malloc = fftwf_malloc;
+    static constexpr auto PlanDFT_R2C = fftwf_plan_dft_r2c_1d;
+    static constexpr auto PlanDFT_C2R = fftwf_plan_dft_c2r_1d;
+    static constexpr auto Execute = fftwf_execute;
+    static constexpr auto ExecuteDFT_R2C = fftwf_execute_dft_r2c;
+    static constexpr auto ExecuteDFT_C2R = fftwf_execute_dft_c2r;
+    static constexpr auto DestroyPlan = fftwf_destroy_plan;
+    static constexpr auto Free = fftwf_free;
+};
+
 
 // Class to plan and perfoms all the FFT related operations
 template <class T>

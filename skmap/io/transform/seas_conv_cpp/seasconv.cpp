@@ -60,7 +60,7 @@ int run(const unsigned int N_years,
     const unsigned int N_samp = N_years * N_ipy;
     const unsigned int N_ext = N_samp * 2;
     const unsigned int N_fft = N_samp + 1;
-
+ 
     // Link the input/output data to Eigen matrices
     Eigen::Map<NumpyMatReal> ts_ext(ts_in, N_pix, N_ext);
     Eigen::Map<NumpyMatReal> mask_ext(qa_out, N_pix, N_ext);
@@ -111,8 +111,6 @@ int run(const unsigned int N_years,
     return 0;
 }
 
-
-// @FIXME move to fftwf and matricies float (maybe templatizing it)
 extern "C"
 int runDouble(const unsigned int N_years,
     const unsigned int N_ipy,
@@ -122,5 +120,17 @@ int runDouble(const unsigned int N_years,
     double* ts_in,
     double* qa_out) {
     return run<double>(N_years, N_ipy, N_pix, att_seas, att_env, ts_in, qa_out);
+}
+ 
+
+extern "C"
+int runFloat(const unsigned int N_years,
+    const unsigned int N_ipy,
+    const unsigned int N_pix,
+    const float att_seas,
+    const float att_env,
+    float* ts_in,
+    float* qa_out) {
+    return run<float>(N_years, N_ipy, N_pix, att_seas, att_env, ts_in, qa_out);
 }
  
