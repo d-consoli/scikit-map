@@ -421,6 +421,8 @@ try:
       asset_id_delim = '_',
       asset_id_fields = [0,2,4],
       catalogs = None,
+      auth_user = None,
+      auth_pw = None,
       verbose = False
     ):
 
@@ -433,7 +435,7 @@ try:
       self.asset_id_fields = asset_id_fields
 
       coll_columns = gsheet.collections.columns
-      self.additional_url_cols = list(coll_columns[pd.Series(coll_columns).str.startswith('url')])
+      self.additional_url_cols = list(coll_columns[pd.Series(coll_columns).str.contains('url.*[1-9]*[1-9]$', regex=True)])
       
       self.stac_extensions = {
         'cole': [
@@ -482,10 +484,10 @@ try:
         'catalog': ['id', 'title', 'description'],
         'common_metadata': ['constellation', 'platform', 'instruments', 'gsd'],
         'internal': ['start_date', 'end_date', 'date_step', 'date_unit', 'date_style','catalog', 'providers', 'main_url', 'ignore_29feb', 
-          'depth', 'ignore', 'extent_list', 'img_preview_url']
+          'depth', 'ignore', 'extent_list', 'expression', 'img_preview_url']
       }
 
-      self.fields['internal'] += self.additional_url_cols
+      self.fields['internal'] += list(coll_columns[pd.Series(coll_columns).str.contains('url')])
 
       self.fields_lookup = dict.fromkeys(
         set(chain(*[self.fields[key] for key in self.fields.keys()]))
@@ -503,6 +505,10 @@ try:
         self.catalogs = catalogs
       
       self.vector_files = ('extent' in gsheet.collections)
+
+      self.basic_auth = None
+      if auth_user is not None and auth_pw is not None:
+        self.basic_auth = f'{auth_user}:{auth_pw}'
 
       if self.vector_files:
         self._populate_vector()
@@ -558,9 +564,9 @@ try:
         style_urls = [ row['sld_url'], row['qml_url'] ]
 
         if main_url in bbox_footprint_results:
-            bbox, footprint = bbox_footprint_results[main_url]
+          bbox, footprint = bbox_footprint_results[main_url]
 
-            items.append(self._new_item(row, dt1, dt2, bbox, footprint, asset_urls, style_urls))
+          items.append(self._new_item(row, dt1, dt2, bbox, footprint, asset_urls, style_urls))
         else:
           self._verbose(f"The url {main_url} is invalid.")
 
@@ -571,11 +577,16 @@ try:
         
       for rid, row in self.gsheet.collections.iterrows():
     
-        start_date, end_date = datetime.strftime(row['start_date'], '%Y%m%d'), datetime.strftime(row['end_date'], '%Y%m%d')
-
+        start_date = datetime.strftime(row['start_date'], '%Y%m%d')
         start_date_item = datetime.strptime(start_date, '%Y%m%d').strftime('%Y-%m-%d')
-        end_date_item = datetime.strptime(end_date, '%Y%m%d').strftime('%Y-%m-%d')
-
+        
+        end_date_str = 'now'
+        end_date_item = None
+        if not pd.isnull(row['end_date']):
+            end_date = datetime.strftime(row['end_date'], '%Y%m%d')
+            end_date_item = datetime.strptime(end_date, '%Y%m%d').strftime('%Y-%m-%d')
+            end_date_str = end_date
+    
         left_wgs84, bottom_wgs84, right_wgs84, top_wgs84 = tuple(row.extent)
         bbox = tuple(row.extent)
         footprint = Polygon([
@@ -585,7 +596,7 @@ try:
             [right_wgs84, bottom_wgs84]
         ])
 
-        item_id = f'{row["id"]}_{start_date}_{end_date}'
+        item_id = f'{row["id"]}_{start_date}_{{end_date_str}}'
         
         item = pystac.Item(id=item_id,
                       geometry=mapping(footprint),
@@ -594,7 +605,9 @@ try:
                       properties={'start_datetime': start_date_item, 'end_datetime': end_date_item},
                       stac_extensions=["https://stac-extensions.github.io/file/v2.0.0/schema.json"])
 
-        item.common_metadata.gsd = row['gsd']
+        if row['gsd'] != '':
+            item.common_metadata.gsd = float(row['gsd'])
+        
         item.common_metadata.instruments = row['instruments']
 
         if 'platform' in row and row['platform']:
@@ -603,26 +616,35 @@ try:
             item.common_metadata.constellation = row['constellation']
 
         aid = f'{row["id"]}_{Path(row["main_url"]).stem.split("?")[0].lower()}'
-        item.add_asset(aid, pystac.Asset(href=row['main_url'], roles=['data']))
+        atitle = row['main_url_label'] if row['main_url_label'] != '' else None
+        arole = row[f'main_url_role'] if row[f'main_url_role'] != '' else None
+        
+        item.add_asset(aid, pystac.Asset(href=row['main_url'], title=atitle, roles=[arole]))
         
         for aurl in self.additional_url_cols:
-            if (row[aurl] != ''):
-                aid = f'{row["id"]}_{Path(row[aurl]).stem.split("?")[0].lower()}'
-                item.add_asset(aid, pystac.Asset(href=row[aurl], roles=['data']))
+          if (row[aurl] != ''):
+              aid = f'{row["id"]}_{Path(row[aurl]).stem.split("?")[0].lower()}'
+              atitle = row[f'{aurl}_label'] if row[f'{aurl}_label'] != '' else None
+              arole = row[f'{aurl}_role'] if row[f'{aurl}_role'] != '' else None
+              item.add_asset(aid, pystac.Asset(href=row[aurl], title=atitle, roles=[arole]))
         
         if row['img_preview_url']:
-            item.add_asset('thumbnail', pystac.Asset(href=row['img_preview_url'], media_type=pystac.MediaType.PNG, roles=['thumbnail']))
+            item.add_asset('thumbnail', pystac.Asset(href=row['img_preview_url'], title='Preview', media_type=pystac.MediaType.PNG, roles=['thumbnail']))
         
         start_date = item.properties['start_datetime']
         end_date = item.properties['end_datetime']
-
-        collection_interval = sorted([
-          datetime.strptime(start_date, '%Y-%m-%d'), 
-          datetime.strptime(end_date, '%Y-%m-%d')
-        ])
         
-        print(collection_interval)
-
+        if end_date is None:
+            collection_interval = [
+              datetime.strptime(start_date, '%Y-%m-%d'), 
+              None
+            ]
+        else:
+            collection_interval = sorted([
+              datetime.strptime(start_date, '%Y-%m-%d'), 
+              datetime.strptime(end_date, '%Y-%m-%d')
+            ])
+        
         unioned_footprint = shape(item.geometry)
         collection_bbox = list(unioned_footprint.bounds)
 
@@ -780,12 +802,17 @@ try:
               thumb_fn = str(thumb_fn).replace(str(output_dir), thumb_base_url)
 
             item.add_asset(thumd_id, pystac.Asset(href=thumb_fn, media_type=pystac.MediaType.PNG, roles=roles))
+            print(thumb_fn)
+            print(item)
               
     def _thumbnail(self, url, thumb_fn, item_id, is_thumb_url=False, cmap = 'binary', vmin = None, vmax = None):
       
       if not self.thumb_overwrite and Path(thumb_fn).exists():
         #self._verbose(f'Skipping {thumb_fn}')
         return (thumb_fn, item_id, is_thumb_url)
+
+      if self.basic_auth is not None:
+        url = url.replace('https://', f'https://{self.basic_auth}@')
 
       r = requests.head(url)
       if not (r.status_code == 200):
@@ -827,7 +854,10 @@ try:
           return(None, item_id, is_thumb_url)
 
     def sld2cmap(self, sld_url):
-    
+          
+      if self.basic_auth is not None:
+        sld_url = sld_url.replace('https://', f'https://{self.basic_auth}@')
+
       r = requests.get(sld_url, allow_redirects=True)
     
       if (r.status_code == 200):
@@ -896,9 +926,21 @@ try:
 
       return delim.join(result)
 
+    def _asset_expression(self, row, asset_id):
+      if 'expression' in row and row['expression'] != '' and asset_id in row['expression']:
+        #print(asset_id, row['expression'])
+        return { 'expression': row['expression'][asset_id] }
+      else:
+        return {}
+
     def _ext_file_asset(self, asset):
       if asset.href:
-        r = requests.head(asset.href)
+        
+        href = asset.href        
+        if self.basic_auth is not None:
+          href = href.replace('https://', f'https://{self.basic_auth}@')
+
+        r = requests.head(href)
         
         keys = [ 'Content-Length', 'Content-Type', 'Last-Modified']
         if r.status_code == 200:
@@ -945,11 +987,16 @@ try:
       #Band.create(name='EVI', description='Enhanced vegetation index', common_name='evi')
       #])
 
-      item.add_asset(self._asset_id(main_url, self.asset_id_delim, self.asset_id_fields), \
-        pystac.Asset(href=main_url, media_type=pystac.MediaType.COG, roles=['data'], extra_fields={'main': True}))
+      asset_id = self._asset_id(main_url, self.asset_id_delim, self.asset_id_fields)
+
+      item.add_asset(asset_id, \
+        pystac.Asset(href=main_url, media_type=pystac.MediaType.COG, roles=['data'], \
+          extra_fields={**{'main': True}, **self._asset_expression(row, asset_id)}))
       for aurl in additional_urls:
-        item.add_asset(self._asset_id(aurl, self.asset_id_delim, self.asset_id_fields), \
-          pystac.Asset(href=aurl, media_type=pystac.MediaType.COG, roles=['data']))
+        asset_id = self._asset_id(aurl, self.asset_id_delim, self.asset_id_fields)
+        item.add_asset(asset_id, \
+          pystac.Asset(href=aurl, media_type=pystac.MediaType.COG, roles=['data'], \
+            extra_fields={**{}, **self._asset_expression(row, asset_id)}))
 
       for surl in style_urls:
         suffixes = Path(surl).suffixes
@@ -979,7 +1026,7 @@ try:
       if add_extra_fields:
         _args['extra_fields'] = {}
         for ef in row.keys():
-          if ef not in self.fields_lookup and row[ef]:
+          if ef not in self.fields_lookup and row[ef] and str(row[ef]) != 'nan':
             _args['extra_fields'][ef] = row[ef]
 
       return _args
@@ -987,6 +1034,10 @@ try:
     def _bbox_and_footprint(self, raster_fn):
 
       self._verbose(f'Accessing COG bounds ({raster_fn})')
+
+      _raster_fn = str(raster_fn)
+      if self.basic_auth is not None:
+        raster_fn = raster_fn.replace('https://', f'https://{self.basic_auth}@')
 
       r = requests.head(raster_fn)
       if not (r.status_code == 200):
@@ -1010,7 +1061,7 @@ try:
             [right_wgs84, bottom_wgs84]
           ])
 
-          return (raster_fn, bbox, mapping(footprint))
+          return (_raster_fn, bbox, mapping(footprint))
 
     def save_all(self,
       output_dir:str = 'stac',
@@ -1045,7 +1096,6 @@ try:
       >>> stac_generator.save_all(output_dir='stac_odse', thumb_base_url=f'https://s3.eu-central-1.wasabisys.com/stac')
 
       """
-
       output_dir = Path(output_dir)
       if not self.vector_files:
         self._generate_thumbs(output_dir, thumb_base_url)
