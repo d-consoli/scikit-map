@@ -154,7 +154,8 @@ class TransArray: public ParArray
 
         void swapRowsValues(std::vector<uint_t> row_select,
                                  float_t value_to_mask,
-                                 float_t new_value);
+                                 float_t new_value,
+                                 std::optional<std::string> comp_type);
 
         void computePercentiles(std::vector<uint_t> col_in_select,
                                 Eigen::Ref<MatFloat> out_data,
@@ -176,13 +177,13 @@ class TransArray: public ParArray
 
 
         void applyTsirf(Eigen::Ref<MatFloat> out_data,
-                         uint_t out_index_offset,
-                         float_t w_0,
-                         Eigen::Ref<VecFloat> w_p,
-                         Eigen::Ref<VecFloat> w_f,
-                         bool keep_original_values,
-                         const std::string& version,
-                         const std::string& backend);
+                        uint_t n_s,
+                        uint_t in_col_offset,
+                        uint_t out_col_offset,
+                        float_t w_0,
+                        Eigen::Ref<VecFloat> w_p,
+                        Eigen::Ref<VecFloat> w_f,
+                        bool keep_original_values);
                          
         void convolveRows(Eigen::Ref<MatFloat> out_data,
                          float_t w_0,
@@ -204,6 +205,36 @@ class TransArray: public ParArray
                                      std::vector<std::vector<uint_t>>& agg_pattern);
 
 
+        MatFloat extractChunk(Eigen::Ref<MatFloat> data,
+                                      uint_t sample_idx,
+                                      uint_t row_start, uint_t row_end,
+                                      uint_t col_start, uint_t col_end,
+                                      uint_t x_size, uint_t y_size);
+
+        
+        void updateChunk(Eigen::Ref<MatFloat> data, Eigen::Ref<MatFloat> chunk,
+                                 uint_t sample_idx,
+                                 uint_t row_start, uint_t row_end,
+                                 uint_t col_start, uint_t col_end,
+                                 uint_t x_size, uint_t y_size);
+
+        void inpaintChunks(uint_t inpaint_radius,
+                          uint_t padding,
+                          uint_t x_size,
+                          uint_t y_size,
+                          std::vector<uint_t> sample_idxs,
+                          std::vector<uint_t> row_starts,
+                          std::vector<uint_t> row_ends,
+                          std::vector<uint_t> col_starts,
+                          std::vector<uint_t> col_ends);
+
+        void eraseChunks(uint_t x_size,
+                          uint_t y_size,
+                          std::vector<uint_t> sample_idxs,
+                          std::vector<uint_t> row_starts,
+                          std::vector<uint_t> row_ends,
+                          std::vector<uint_t> col_starts,
+                          std::vector<uint_t> col_ends);
 
 
 };

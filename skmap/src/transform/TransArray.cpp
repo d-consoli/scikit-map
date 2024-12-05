@@ -1,5 +1,6 @@
 #include "transform/TransArray.h"
 
+
 namespace skmap {
 
     TransArray::TransArray(Eigen::Ref<MatFloat> data, const uint_t n_threads)
@@ -72,6 +73,47 @@ namespace skmap {
             out_data.row(permutation_matrix[i][0]) = m_data.block(permutation_matrix[i][1]*out_data.cols(), permutation_matrix[i][2], 1, out_data.cols()).transpose();
         };
         this->parForRange(transposeReorderArrayRow, permutation_matrix.size());
+    }
+
+    MatFloat TransArray::extractChunk(Eigen::Ref<MatFloat> data,
+                                      uint_t sample_idx,
+                                      uint_t row_start, uint_t row_end,
+                                      uint_t col_start, uint_t col_end,
+                                      uint_t x_size, uint_t y_size)
+    {
+        skmapAssertIfTrue((x_size * y_size != (uint_t) data.cols()),
+                          "scikit-map ERROR 44a: x_size * y_size does not match the col size of the data matrix");
+        uint_t chunk_rows = row_end - row_start;
+        uint_t chunk_cols = col_end - col_start;
+        MatFloat chunk(chunk_rows, chunk_cols);
+
+        for (uint_t i = row_start; i < row_end; ++i)
+        {
+            uint_t start_idx = i * y_size + col_start;
+            uint_t end_idx = i * y_size + col_end;
+            chunk.row(i - row_start) = data.row(sample_idx).segment(start_idx, end_idx - start_idx);
+        }
+        return chunk;
+    }
+
+
+    void TransArray::updateChunk(Eigen::Ref<MatFloat> data, Eigen::Ref<MatFloat> chunk,
+                                 uint_t sample_idx,
+                                 uint_t row_start, uint_t row_end,
+                                 uint_t col_start, uint_t col_end,
+                                 uint_t x_size, uint_t y_size)
+    {
+        skmapAssertIfTrue((x_size * y_size != (uint_t) data.cols()),
+                          "scikit-map ERROR 44b: x_size * y_size does not match the col size of the data matrix");
+        uint_t chunk_rows = row_end - row_start;
+        uint_t chunk_cols = col_end - col_start;
+        skmapAssertIfTrue((chunk_rows != (uint_t) chunk.rows()) || (chunk_cols != (uint_t) chunk.cols()),
+                          "scikit-map ERROR 45: chunk size does not match the input cols/rows ranges");
+        for (uint_t i = 0; i < chunk_rows; ++i) 
+        {
+            uint_t start_idx = (row_start + i) * y_size + col_start;
+            data.row(sample_idx).segment(start_idx, chunk_cols) = chunk.row(i);
+        }
     }
 
 
@@ -207,21 +249,36 @@ namespace skmap {
         this->parForRange(extractArrayCol, col_select.size());
     }
 
-
-
-
-    void TransArray::swapRowsValues(std::vector<uint_t> row_select,
-                                    float_t value_to_mask,
-                                    float_t new_value)
-    {
-        auto swapRowValues = [&] (uint_t i)
-        {
-            m_data.row(row_select[i]) = (m_data.row(row_select[i]).array() == value_to_mask)
-                    .select(new_value, m_data.row(row_select[i]));
-        };
-        this->parForRange(swapRowValues, row_select.size());
-    }
-
+void TransArray::swapRowsValues(std::vector<uint_t> row_select,
+                                float_t value_to_mask,
+                                float_t new_value,
+                                std::optional<std::string> comp_type)
+{
+    auto swapRowValues = [&](uint_t i) {
+        if (row_select[i] >= (uint_t) m_data.rows()) {
+            skmapAssertIfTrue(true, "Row index out of bounds");
+        }
+        auto row = m_data.row(row_select[i]).array();
+        if (comp_type.has_value()) {
+            if (comp_type.value() == "greater") {
+                m_data.row(row_select[i]) = (row > value_to_mask).select(new_value, row);
+            } else if (comp_type.value() == "less") {
+                m_data.row(row_select[i]) = (row < value_to_mask).select(new_value, row);
+            } else if (comp_type.value() == "greater_equal") {
+                m_data.row(row_select[i]) = (row >= value_to_mask).select(new_value, row);
+            } else if (comp_type.value() == "less_equal") {
+                m_data.row(row_select[i]) = (row <= value_to_mask).select(new_value, row);
+            } else if (comp_type.value() == "equal") {
+                m_data.row(row_select[i]) = (row == value_to_mask).select(new_value, row);
+            } else {
+                skmapAssertIfTrue(true, "Unknown comparison type: " + comp_type.value());
+            }
+        } else {
+            m_data.row(row_select[i]) = (row == value_to_mask).select(new_value, row);
+        }
+    };
+    this->parForRange(swapRowValues, row_select.size());
+}
 
 
 
@@ -235,10 +292,6 @@ namespace skmap {
         };
         this->parForRange(swapRowValues, row_select.size());
     }
-
-
-
-
 
     void TransArray::maskData(std::vector<uint_t> row_select,
                               Eigen::Ref<MatFloat> mask,
@@ -254,8 +307,61 @@ namespace skmap {
     }
 
 
+    void TransArray::inpaintChunks(uint_t inpaint_radius,
+                                uint_t padding,
+                                uint_t x_size,
+                                uint_t y_size,
+                                std::vector<uint_t> sample_idxs,
+                                std::vector<uint_t> row_starts,
+                                std::vector<uint_t> row_ends,
+                                std::vector<uint_t> col_starts,
+                                std::vector<uint_t> col_ends)
+    {
+    auto inpaintChunk = [&](uint_t i)
+    {
+        uint_t padded_row_start = (row_starts[i] > padding) ? row_starts[i] - padding : 0;
+        uint_t padded_row_end = std::min(row_ends[i] + padding, x_size);
+        uint_t padded_col_start = (col_starts[i] > padding) ? col_starts[i] - padding : 0;
+        uint_t padded_col_end = std::min(col_ends[i] + padding, y_size);
+        MatFloat padded_chunk = this->extractChunk(m_data, sample_idxs[i], padded_row_start, padded_row_end, padded_col_start, padded_col_end, x_size, y_size);
+        MatByte mask_chunk = padded_chunk.array().isNaN().cast<byte_t>() * 255;
+        padded_chunk = padded_chunk.array().isNaN().select(0.0f, padded_chunk);
+        // @FIXME CV_32FC1 should be dependent on the definition of float_t
+        cv::Mat padded_chunk_cv(padded_chunk.rows(), padded_chunk.cols(), CV_32FC1, padded_chunk.data());
+        cv::Mat mask_chunk_cv(mask_chunk.rows(), mask_chunk.cols(), CV_8UC1, mask_chunk.data());
+        cv::Mat inpainted_padded_chunk_cv;
+        cv::inpaint(padded_chunk_cv, mask_chunk_cv, inpainted_padded_chunk_cv, static_cast<double>(inpaint_radius), cv::INPAINT_TELEA);
+        Eigen::Map<MatFloat> inpainted_padded_chunk(inpainted_padded_chunk_cv.ptr<float_t>(), inpainted_padded_chunk_cv.rows, inpainted_padded_chunk_cv.cols);
+        uint_t non_padded_row_start = row_starts[i] - padded_row_start;
+        uint_t non_padded_row_end = non_padded_row_start + (row_ends[i] - row_starts[i]);
+        uint_t non_padded_col_start = col_starts[i] - padded_col_start;
+        uint_t non_padded_col_end = non_padded_col_start + (col_ends[i] - col_starts[i]);
+        MatFloat inpainted_chunk = inpainted_padded_chunk.block(non_padded_row_start, non_padded_col_start,
+                                                                non_padded_row_end - non_padded_row_start,
+                                                                non_padded_col_end - non_padded_col_start);
+        this->updateChunk(m_data, inpainted_chunk, sample_idxs[i], row_starts[i], row_ends[i], col_starts[i], col_ends[i], x_size, y_size);
+    };
+    this->parForRange(inpaintChunk, sample_idxs.size());
+    }
 
 
+    void TransArray::eraseChunks(uint_t x_size,
+                                uint_t y_size,
+                                std::vector<uint_t> sample_idxs,
+                                std::vector<uint_t> row_starts,
+                                std::vector<uint_t> row_ends,
+                                std::vector<uint_t> col_starts,
+                                std::vector<uint_t> col_ends)
+    {
+    auto eraseChunk = [&](uint_t i)
+    {
+        uint_t chunk_rows = row_ends[i] - row_starts[i];
+        uint_t chunk_cols = col_ends[i] - col_starts[i];
+        MatFloat empty_chunk = MatFloat::Constant(chunk_rows, chunk_cols, nan_v); 
+        this->updateChunk(m_data, empty_chunk, sample_idxs[i], row_starts[i], row_ends[i], col_starts[i], col_ends[i], x_size, y_size);
+    };
+    this->parForRange(eraseChunk, sample_idxs.size());
+    }
 
     void TransArray::maskDataRows(std::vector<uint_t> row_select,
                               Eigen::Ref<MatFloat> mask,
@@ -660,40 +766,41 @@ namespace skmap {
 
 
     void TransArray::applyTsirf(Eigen::Ref<MatFloat> out_data,
-                                 uint_t out_index_offset,
+                                 uint_t n_s,
+                                 uint_t in_col_offset,
+                                 uint_t out_col_offset,
                                  float_t w_0,
                                  Eigen::Ref<VecFloat> w_p,
                                  Eigen::Ref<VecFloat> w_f,
-                                 bool keep_original_values,
-                                 const std::string& version,
-                                 const std::string& backend)
+                                 bool keep_original_values)
     {
         auto applyTsirfChunk = [&] (Eigen::Ref<MatFloat> chunk, uint_t row_start, uint_t row_end)
         {
-            uint_t n_s = chunk.cols();
+            MatFloat chunk_col_sel(chunk.rows(), n_s);
+            for (uint_t j = 0; j < n_s; ++j)
+                chunk_col_sel.col(j) = chunk.col(in_col_offset + j);
             uint_t n_e = n_s + std::max(w_p.size(), w_f.size());
             VecFloat w_e = VecFloat::Zero(n_e);
             w_e(0) = w_0;
             w_e.segment(1, w_f.size()) = w_f;
             w_e.segment(n_e-w_p.size(), w_p.size()) = w_p;
-            auto out_block = out_data.block(out_index_offset + row_start, 0, row_end - row_start, n_s);
+            auto out_block = out_data.block(row_start, out_col_offset, row_end - row_start, n_s);
             MatFloat W(n_s, n_s);
             for (uint_t i = 0; i < n_s; ++i)
             {
                 for (uint_t j = 0; j < n_s; ++j)
-                {
                     W(j, i) = w_e((-i + j + n_e) % n_e);
-                }
             }
-            MatBool gaps_mask = chunk.array().isNaN();
-            MatBool valid_mask = chunk.array().isFinite();
-            MatFloat chunk_masked = chunk;
+            MatBool gaps_mask = chunk_col_sel.array().isNaN();
+            MatBool valid_mask = chunk_col_sel.array().isFinite();
+            MatFloat chunk_masked = chunk_col_sel;
             chunk_masked = gaps_mask.select(0.0, chunk_masked);
             MatFloat den = valid_mask.cast<float_t>() * W;
             out_block = (chunk_masked * W).array() / den.array();
             MatFloat NaNs = MatFloat::Constant(out_block.rows(), out_block.cols(), nan_v);
             out_block = (den.array() < w_e.minCoeff()).select(NaNs, out_block);
-            out_block = valid_mask.select(chunk_masked, out_block);
+            if (keep_original_values)
+                out_block = valid_mask.select(chunk_masked, out_block);
         };
         this->parChunk(applyTsirfChunk);
     }

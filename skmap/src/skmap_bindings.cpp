@@ -229,10 +229,11 @@ void swapRowsValues(Eigen::Ref<MatFloat> data,
                     const uint_t n_threads,
                     std::vector<uint_t> row_select,
                     float_t value_to_mask,
-                    float_t new_value)
+                    float_t new_value,
+                    std::optional<std::string> comp_type)
 {
     TransArray transArray(data, n_threads);
-    transArray.swapRowsValues(row_select, value_to_mask, new_value);
+    transArray.swapRowsValues(row_select, value_to_mask, new_value, comp_type);
 }
 
 
@@ -650,20 +651,19 @@ void computePercentiles(Eigen::Ref<MatFloat> data,
 }
 
 void applyTsirf(Eigen::Ref<MatFloat> data,
-                 const uint_t n_threads,
-                 Eigen::Ref<MatFloat> out_data,
-                 uint_t out_index_offset,
-                 float_t w_0,
-                 Eigen::Ref<VecFloat> w_p,
-                 Eigen::Ref<VecFloat> w_f,
-                 bool keep_original_values,
-                 const std::string& version,
-                 const std::string& backend)
+                const uint_t n_threads,
+                Eigen::Ref<MatFloat> out_data,
+                uint_t n_s,
+                uint_t in_col_offset,
+                uint_t out_col_offset,
+                float_t w_0,
+                Eigen::Ref<VecFloat> w_p,
+                Eigen::Ref<VecFloat> w_f,
+                bool keep_original_values)
 
 {
     TransArray transArray(data, n_threads);
-    transArray.applyTsirf(out_data, out_index_offset,
-                           w_0, w_p, w_f, keep_original_values, version, backend);
+    transArray.applyTsirf(out_data, n_s, in_col_offset, out_col_offset, w_0, w_p, w_f, keep_original_values);
 }
 
 void scaleAndOffset(Eigen::Ref<MatFloat> data,
@@ -705,16 +705,34 @@ void slidingWindowClassMode(Eigen::Ref<MatFloat> data,
     transArray.slidingWindowClassMode(out_data, window_size);
 }
 
-void inpaintTelea(Eigen::Ref<MatFloat> input_chunk,
-                  Eigen::Ref<MatByte> mask_chunk,
-                  uint_t inpaint_radius) 
+void inpaintChunks(Eigen::Ref<MatFloat> data,
+                  const uint_t n_threads,
+                  uint_t inpaint_radius,
+                  uint_t padding,
+                  uint_t x_size,
+                  uint_t y_size,
+                  std::vector<uint_t> sample_idxs,
+                  std::vector<uint_t> row_starts,
+                  std::vector<uint_t> row_ends,
+                  std::vector<uint_t> col_starts,
+                  std::vector<uint_t> col_ends)
 {
-    cv::Mat inputMat(input_chunk.rows(), input_chunk.cols(), CV_32FC1, input_chunk.data());
-    cv::Mat maskMat(mask_chunk.rows(), mask_chunk.cols(), CV_8UC1, mask_chunk.data());
-    cv::Mat inpaintedMat;
-    cv::inpaint(inputMat, maskMat, inpaintedMat, static_cast<double>(inpaint_radius), cv::INPAINT_TELEA);
-    Eigen::Map<MatFloat> inpaintedEigen(inpaintedMat.ptr<float>(), inpaintedMat.rows, inpaintedMat.cols);
-    input_chunk = inpaintedEigen;
+    TransArray transArray(data, n_threads);
+    transArray.inpaintChunks(inpaint_radius, padding, x_size, y_size, sample_idxs, row_starts, row_ends, col_starts, col_ends);
+}
+
+void eraseChunks(Eigen::Ref<MatFloat> data,
+                  const uint_t n_threads,
+                  uint_t x_size,
+                  uint_t y_size,
+                  std::vector<uint_t> sample_idxs,
+                  std::vector<uint_t> row_starts,
+                  std::vector<uint_t> row_ends,
+                  std::vector<uint_t> col_starts,
+                  std::vector<uint_t> col_ends)
+{
+    TransArray transArray(data, n_threads);
+    transArray.eraseChunks(x_size, y_size, sample_idxs, row_starts, row_ends, col_starts, col_ends);
 }
 
 void checkSimdInstructionSetsInUse()
@@ -739,7 +757,8 @@ PYBIND11_MODULE(skmap_bindings, m)
         py::arg() = std::nullopt, py::arg() = std::nullopt,
         "Read Tiff files in parallel with GDAL-Eigen-OpenMP");
     m.def("copyVecInMatrixRow", &copyVecInMatrixRow, "Copy a vector in a matrix row");
-    m.def("inpaintTelea", &inpaintTelea, "Inpaint Telea");
+    m.def("inpaintChunks", &inpaintChunks, "Inpaint chunks");
+    m.def("eraseChunks", &eraseChunks, "Erase chunks");
     m.def("fillArray", &fillArray, "Fill array");
     m.def("selArrayRows", &selArrayRows, "Mask array rows");
     m.def("selArrayCols", &selArrayCols, "Mask array cols");
@@ -747,7 +766,8 @@ PYBIND11_MODULE(skmap_bindings, m)
     m.def("maskData", &maskData, "Mask data");
     m.def("maskDataRows", &maskDataRows, "Mask data rows");
     m.def("maskNan", &maskNan, "Mask NaN");
-    m.def("swapRowsValues", &swapRowsValues, "Swap array values");
+    m.def("swapRowsValues", &swapRowsValues, py::arg(), py::arg(), py::arg(), py::arg(), py::arg(),
+        py::arg() = std::nullopt, "Swap array values");
     m.def("expandArrayRows", &expandArrayRows, "Expand array rows");
     m.def("expandArrayCols", &expandArrayCols, "Expand array cols");
     m.def("extractArrayRows", &extractArrayRows, "Extract array rows");
