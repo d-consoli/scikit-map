@@ -596,7 +596,7 @@ try:
             [right_wgs84, bottom_wgs84]
         ])
 
-        item_id = f'{row["id"]}_{start_date}_{{end_date_str}}'
+        item_id = f'{row["id"]}_{start_date}_{end_date_str}'
         
         item = pystac.Item(id=item_id,
                       geometry=mapping(footprint),
