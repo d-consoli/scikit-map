@@ -827,11 +827,19 @@ try:
           cog_level = self.cog_level
           if cog_level >= len(oviews):
             cog_level = -1
-          
+
           oview = oviews[cog_level]
 
-          result = src.read(1, out_shape=(1, src.height // oview, src.width // oview)).astype('float32')
-          result[result==src.nodata] = np.nan
+          if cmap == 'rgb':
+            result = src.read(out_shape=(3, src.height // oview, src.width // oview)).astype('float32')
+
+            for i in range(0, len(vmin)):
+                if i < len(src.scales):
+                    result[i,:,:] = result[i,:,:] * src.scales[i]
+                result[i,:,:] = np.interp(result[i,:,:], (vmin[i], vmax[i]), (0, 1))
+          else:
+            result = src.read(1, out_shape=(1, src.height // oview, src.width // oview)).astype('float32')
+            result[result==src.nodata] = np.nan
 
           if vmin is None:
             perc = np.nanpercentile(result,[8,92])
@@ -840,14 +848,19 @@ try:
           fig, ax = plt.subplots(figsize=(1, 1))
 
           ax.axis('off')
-          plt.imsave(thumb_fn, result, cmap=cmap, vmin=vmin, vmax=vmax)
+          #plt.imsave(thumb_fn, result, cmap=cmap, vmin=vmin, vmax=vmax)
 
-          basewidth = 675
-          img = Image.open(thumb_fn)
-          wpercent = (basewidth/float(img.size[0]))
-          hsize = int((float(img.size[1])*float(wpercent)))
-          img = img.resize((basewidth,hsize), Image.ANTIALIAS)
-          img.save(thumb_fn)
+          if cmap == 'rgb':
+            plt.imsave(thumb_fn, result.transpose(1,2,0))
+          else:
+            plt.imsave(thumb_fn, result, cmap=cmap, vmin=vmin, vmax=vmax)
+
+            basewidth = 675
+            img = Image.open(thumb_fn)
+            wpercent = (basewidth/float(img.size[0]))
+            hsize = int((float(img.size[1])*float(wpercent)))
+            img = img.resize((basewidth,hsize), Image.ANTIALIAS)
+            img.save(thumb_fn)
 
           return (thumb_fn, item_id, is_thumb_url)
         except:
@@ -864,19 +877,36 @@ try:
         bs_data = BeautifulSoup(r.content, 'xml') 
         colors, values = [], []
 
-        for cmp in bs_data.find_all('ColorMapEntry'):
-          colors.append(cmp.get('color'))
-          values.append(float(cmp.get('quantity')))
+        colorMapEntries = bs_data.find_all('ColorMapEntry')
+        normalizeEntries = bs_data.find_all('Normalize')
 
-        values = np.array(values)
-        np.min(values), np.max(values)
+        if len(colorMapEntries) > 0:
 
-        thumb_vmin, thumb_vmax = np.nanmin(values), np.nanmax(values)
-        thumb_cmap = ','.join(colors)
-      
-        return thumb_cmap, thumb_vmin, thumb_vmax
-      else:
-        return 'binary', None, None
+            colors, values = [], []
+
+            for cmp in bs_data.find_all('ColorMapEntry'):
+              colors.append(cmp.get('color'))
+              values.append(float(cmp.get('quantity')))
+
+            values = np.array(values)
+            np.min(values), np.max(values)
+
+            thumb_vmin, thumb_vmax = np.nanmin(values), np.nanmax(values)
+            thumb_cmap = ','.join(colors)
+
+            return thumb_cmap, thumb_vmin, thumb_vmax
+        elif len(normalizeEntries) > 0:
+
+            thumb_cmap = 'rgb'
+            thumb_vmin, thumb_vmax = [], []
+
+            for n in normalizeEntries:
+                thumb_vmin.append(float(n.select_one('VendorOption[name=minValue]').string))
+                thumb_vmax.append(float(n.select_one('VendorOption[name=maxValue]').string))
+
+            return thumb_cmap, thumb_vmin, thumb_vmax
+        else:
+            return 'binary', None, None
     
     def _new_collection(self, row, items):  
       
