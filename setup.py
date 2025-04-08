@@ -20,8 +20,7 @@ module_skmap_bindings = setuptools.Extension(
     extra_compile_args=[
         '-fopenmp',
         '-std=c++17',
-        '-std=gnu++17',
-        '-march=native'
+        '-O3'
     ],
     extra_link_args=['-lgomp'],
     libraries=[
