@@ -21,11 +21,7 @@ module_skmap_bindings = setuptools.Extension(
         '-fopenmp',
         '-std=c++17',
         '-std=gnu++17',
-        '-march=native',
-        '-mavx512f',
-        '-mavx512dq',
-        '-mavx512vl',
-        '-mavx512bw'
+        '-march=native'
     ],
     extra_link_args=['-lgomp'],
     libraries=[
