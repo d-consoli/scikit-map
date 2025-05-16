@@ -2,8 +2,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
-from eumap.misc import find_files, ttprint, nan_percentile, GoogleSheet
-from eumap.raster import read_rasters, save_rasters
+from skmap.misc import ttprint
 import warnings
 import multiprocess as mp
 import time
@@ -454,10 +453,17 @@ def parameter_fine_tuning(cal, covs, tgt, prop, output_folder, version):
 
 from matplotlib.colors import LinearSegmentedColormap
 
-# Define the custom CET-L19 colormap
-cet_l19_cmap = LinearSegmentedColormap.from_list(
-    "CET-L19", ["#abdda4", "#ffffbf", "#fdae61", "#d7191c"]
-)
+
+from cmcrameri import cm
+
+cmap = cm.batlow_r  
+cmap.set_bad(color="#F8F8FF")  # for missing values
+
+
+# # Define the custom CET-L19 colormap
+# cmap = LinearSegmentedColormap.from_list(
+#     "CET-L19", ["#abdda4", "#ffffbf", "#fdae61", "#d7191c"]
+# )
 
 def accuracy_plot(y_test, y_pred, prop, space, mdl, test_type, data_path):
     rmse, mae, medae, mape, ccc, r2, bias = calc_metrics(y_test, y_pred, space)
@@ -472,7 +478,7 @@ def accuracy_plot(y_test, y_pred, prop, space, mdl, test_type, data_path):
     ax.set_title(f'{test_type} of {mdl} in {space} scale using {len(y_test)} data\nRMSE={rmse:.2f}, CCC={ccc:.2f}, bias={bias:.2f}')
     
     # Use the CET-L19 colorblind-friendly colormap
-    hb = ax.hexbin(y_pred, y_test, gridsize=(20, 20), cmap=cet_l19_cmap, mincnt=2, bins='log')
+    hb = ax.hexbin(y_pred, y_test, gridsize=(20, 20), cmap=cmap, mincnt=2, bins='log')
     ax.set_xlabel(f'Predicted {prop}')
     ax.set_ylabel(f'Observed {prop}')
     ax.set_aspect('auto', adjustable='box')
@@ -487,6 +493,9 @@ def accuracy_plot(y_test, y_pred, prop, space, mdl, test_type, data_path):
     
     plt.tight_layout(rect=[0, 0, 0.92, 1])  # Adjust the right margin to make room for colorbar
     plt.savefig(f'{data_path}/{prop}/plot_accuracy.{test_type}_{mdl}.{prop}.pdf', format='pdf', bbox_inches='tight', dpi=300)
+    
+    plt.show()
+    
     return rmse, mae, medae, mape, ccc, r2, bias
 
 
@@ -506,7 +515,7 @@ def accuracy_plot_pred_space(y_test, y_pred, prop, space, mdl, test_type, data_p
     
     ax.set_title(f'{test_type} of {mdl} in {space} scale using {len(y_test)} data\nRMSE={rmse:.2f}, CCC={ccc:.2f}, bias={bias:.2f}')
     
-    hb = ax.hexbin(y_pred, y_test, gridsize=(20, 20), cmap=cet_l19_cmap, mincnt=2, bins='log')
+    hb = ax.hexbin(y_pred, y_test, gridsize=(20, 20), cmap=cmap, mincnt=2, bins='log')
 
     ax.set_xlabel(f'Predicted {prop}')
     ax.set_ylabel(f'Observed {prop}')
@@ -538,7 +547,7 @@ def accuracy_strata_plot(metric, strata_df, prop, mdl):
         pivot_data,
         annot=True,
         fmt=".2f",
-        cmap=cet_l19_cmap,
+        cmap=cmap,
         cbar_kws={'label': metric},
         annot_kws={"fontsize": 11},  # Smaller font size for annotations
     )
@@ -748,7 +757,7 @@ def plot_histogram(df, prop, space, data_path, version):
         plt.show()
         plt.close()
         
-def pdp_hexbin(df, prop, space, mdl, data_path, version, fn = 3, grid_resolution=50, bins = None, cmap=cet_l19_cmap):
+def pdp_hexbin(df, prop, space, mdl, data_path, version, fn = 3, grid_resolution=50, bins = None, cmap=cmap):
     """
     Generate a partial dependence hexbin heatmap for a single feature.
 
