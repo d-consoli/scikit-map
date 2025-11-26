@@ -16,10 +16,10 @@ while read -r filename; do
     calc_expr="${calc_expr} + $letter"
   fi
   ((i++))
-done < /mnt/ripley/global_soc/my-skmap/organic_soil_v2.in
+done < haploxerolls.in
 
 gdal_calc.py $files --calc="$calc_expr" \
-  --outfile=/tmp/organic_sum_${tile}.tif \
+  --outfile=/mnt/ripley/gen_cog/organic_soils/haploxerolls_sum_${tile}.tif \
   --NoDataValue=255 \
   --co TILED=YES \
   --co BIGTIFF=YES \
@@ -30,5 +30,5 @@ gdal_calc.py $files --calc="$calc_expr" \
   --co NUM_THREADS=8 \
   --co SPARSE_OK=TRUE
 
-mc cp /tmp/organic_sum_${tile}.tif gaia/tmp-global-soil/organic_soils_v20251031/organic_sum_${tile}.tif
-rm /tmp/organic_sum_${tile}.tif
+mc cp /mnt/ripley/gen_cog/organic_soils/haploxerolls_sum_${tile}.tif gaia/tmp-global-soil/haploxerolls_soils_v20250403/haploxerolls_sum_${tile}.tif
+rm /mnt/ripley/gen_cog/organic_soils/haploxerolls_sum_${tile}.tif
